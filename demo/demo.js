@@ -20,15 +20,27 @@
         img.onerror = reject;
         img.src = readerEvent.target.result;
       };
+      reader.onerror = reject;
       reader.readAsDataURL(rawFile);
     });
 
-  const measureBlur = (imageData) => {
+  let selectionId = 0;
+  let activeWorker;
+
+  const measureBlur = (imageData, requestId) => {
     const worker = new Worker('worker.js', { type: 'module' });
+    activeWorker = worker;
     worker.onerror = (event) => {
+      worker.terminate();
+      if (requestId !== selectionId) return;
+      activeWorker = undefined;
+      spinner.style.display = 'none';
       console.log('worker error:', event);
     };
     worker.onmessage = (messageEvent) => {
+      worker.terminate();
+      if (requestId !== selectionId) return;
+      activeWorker = undefined;
       showScore(messageEvent.data.score);
     };
     worker.postMessage({ imageData });
@@ -57,11 +69,18 @@
   };
 
   const measureBlurAndShowScore = (changeFileInputEvent) => {
+    const requestId = ++selectionId;
+    if (activeWorker) {
+      activeWorker.terminate();
+      activeWorker = undefined;
+    }
     spinner.style.display = 'block';
+    blurScore.innerHTML = '';
     scoreDetails.innerHTML = '';
     blurScoreExplanation.style.display = 'none';
     calculationTime = Date.now();
     readImageFile(changeFileInputEvent.target.files[0]).then((img) => {
+      if (requestId !== selectionId) return;
       const context = canvas.getContext('2d');
 
       canvas.width = img.width;
@@ -75,11 +94,16 @@
         canvas.height
       );
 
-      measureBlur(canvasData);
-    }, console.error);
+      measureBlur(canvasData, requestId);
+    }).catch((error) => {
+      if (requestId !== selectionId) return;
+      spinner.style.display = 'none';
+      console.error(error);
+    });
   };
 
   document
     .querySelector('#upload_image')
     .addEventListener('change', measureBlurAndShowScore, false);
 })();
+
